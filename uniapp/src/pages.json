@@ -1,0 +1,28 @@
+{
+	"pages": [
+		{
+			"path": "pages/poem/list",
+			"style": {
+				"navigationBarTitleText": "古诗词资源库"
+			}
+		},
+		{
+			"path": "pages/poem/detail",
+			"style": {
+				"navigationBarTitleText": "诗词详情"
+			}
+		},
+		{
+			"path": "pages/poet/relationship",
+			"style": {
+				"navigationBarTitleText": "诗人关系图谱"
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "uni-app",
+		"navigationBarBackgroundColor": "#F8F8F8",
+		"backgroundColor": "#F8F8F8"
+	}
+}
