@@ -12,17 +12,15 @@ import bodyParser from 'body-parser';
 
 
 
-// 引入 Gemini SDK
+// 引入 Axios (用于 API 调用)
 
-import { GoogleGenAI } from '@google/genai';
+import axios from 'axios'; 
 
 
 
 // 🌟 引入 SOCKS 代理模块
 
 import { SocksProxyAgent } from 'socks-proxy-agent'; 
-
-
 
 
 
@@ -33,6 +31,8 @@ import * as mysqlTypes from 'mysql2';
 type RowDataPacket = mysqlTypes.RowDataPacket;
 
 type ResultSetHeader = mysqlTypes.ResultSetHeader;
+
+type Pool = mysql.Pool; 
 
 
 
@@ -49,6 +49,16 @@ const GEMINI_API_KEY = 'AIzaSyBJQa_Dq7DWef4xfLfmgPDRH8uDsDyIWTg';
 // 🌟 关键：使用 SOCKS5 协议，并使用您之前确认的 7897 端口
 
 const SOCKS_PROXY_URL = 'socks5://127.0.0.1:7897'; 
+
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent";
+
+
+
+// 代理 Agent 初始化
+
+const agent = new SocksProxyAgent(SOCKS_PROXY_URL);
+
+console.log(`✅ SOCKS 代理 Agent 已创建: ${SOCKS_PROXY_URL}`);
 
 
 
@@ -76,51 +86,91 @@ const dbConfig = {
 
 // 全局数据库连接池
 
-let pool: mysql.Pool; 
+let pool: Pool; 
 
 const app = express();
 
-app.use(bodyParser.json()); // 确保在路由前解析 JSON
+app.use(bodyParser.json()); 
 
 
 
 
 
-// 🌟 核心：初始化 Gemini 客户端，使用硬编码密钥并配置 SOCKS 代理
+// --- 数据库连接初始化 ---
 
 try {
 
-    const proxyAgent = new SocksProxyAgent(SOCKS_PROXY_URL);
+    pool = mysql.createPool(dbConfig);
 
-    
-
-    // 🌟 关键：将 proxyAgent 作为 agent 属性传入
-
-    const ai = new GoogleGenAI({
-
-        apiKey: GEMINI_API_KEY, 
-
-        // 强制 TypeScript 接受自定义 agent 属性
-
-        agent: proxyAgent, 
-
-    } as any); 
-
-    
-
-    (global as any).ai = ai; 
-
-    
-
-    console.log(`✅ Gemini 客户端已初始化，使用 SOCKS 代理: ${SOCKS_PROXY_URL}`);
-
-
+    console.log("✅ MySQL 连接池已创建.");
 
 } catch (error) {
 
-    console.error('❌ 初始化 Gemini 客户端或代理失败。请检查 SOCKS 代理依赖是否安装，以及代理地址是否正确:', error);
+    console.error("❌ 创建 MySQL 连接池失败:", error as any);
 
-    (global as any).ai = null; 
+    process.exit(1); 
+
+}
+
+
+
+// --- 辅助函数：通过诗名查找诗词详情 **(已修改)** ---
+
+/**
+
+ * 通过诗名在数据库中精确查找诗词详情。
+
+ * @param title 诗词标题
+
+ * @returns 找到的诗词详情或 null
+
+ */
+
+async function findPoemByTitle(title: string): Promise<PoemResult | null> {
+
+    // 确保输入被清理掉前后空格
+
+    const cleanedTitle = title.trim();
+
+
+
+    // 🌟 修正：使用 TRIM(p.title) 确保数据库中的诗名也清理掉空格，然后使用 = 进行精确匹配
+
+    const sql = `
+
+        SELECT 
+
+            p.id, p.title, p.content, 
+
+            t.name AS poet, 
+
+            t.dynasty 
+
+        FROM poem p
+
+        JOIN poet t ON p.poetID = t.id
+
+        WHERE TRIM(p.title) = ?
+
+    `;
+
+
+
+    try {
+
+        const [rows] = await pool.execute(sql, [cleanedTitle]);
+
+        const poemDetail = (rows as PoemResult[])[0];
+
+        return poemDetail || null;
+
+    } catch (error) {
+
+        console.error('数据库查询诗词详情失败:', error as any);
+
+        return null;
+
+    }
 
 }
 
@@ -128,7 +178,141 @@ try {
 
 
 
+// --- 辅助函数：调用 Gemini API (保持不变) ---
+
+async function callGeminiApi(systemInstruction: string, userPrompt: string): Promise<string> {
+
+    if (!GEMINI_API_KEY) {
+
+        console.error("Gemini API Key is missing.");
+
+        return "无法调用AI服务：缺少API Key";
+
+    }
+
+
+
+    const payload = {
+
+        contents: [
+
+            {
+
+                role: "user",
+
+                parts: [
+
+                    {
+
+                        text: `${systemInstruction}\n\n${userPrompt}` 
+
+                    }
+
+                ]
+
+            }
+
+        ],
+
+    };
+
+
+
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+
+        try {
+
+            const response = await axios.post(
+
+                `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
+
+                payload,
+
+                { 
+
+                    headers: { 'Content-Type': 'application/json' },
+
+                    timeout: 30000, 
+
+                    httpAgent: agent, 
+
+                    httpsAgent: agent,
+
+                }
+
+            );
+
+
+
+            const resultText = response.data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+            
+
+            if (resultText) {
+
+                return resultText; 
+
+            }
+
+            return "";
+
+
+
+        } catch (error) {
+
+            lastError = error;
+
+            
+
+            console.error(`❌ Gemini API调用失败 (尝试 ${attempt + 1}/3):`);
+
+            if (axios.isAxiosError(error)) {
+
+                if (error.response) {
+
+                    console.error(`   -> 响应状态 ${error.response.status}: ${JSON.stringify(error.response.data)}`);
+
+                }
+
+                console.error(`   -> ${error.code || 'AxiosError'} ${error.message}`);
+
+            } else {
+
+                console.error(`   -> 底层网络错误: ${(error as any).message} (检查 SOCKS 代理 ${SOCKS_PROXY_URL} 是否运行)`);
+
+            }
+
+
+
+            if (attempt === 2) break;
+
+            const delay = Math.pow(2, attempt) * 1000;
+
+            await new Promise(resolve => setTimeout(resolve, delay));
+
+        }
+
+    }
+
+    
+
+    console.error("Gemini API调用失败，重试后仍然失败:", lastError as any);
+
+    return "AI服务调用失败，请检查API Key、代理设置和网络连接。";
+
+}
+
+// --- 辅助函数 END ---
+
+
+
+
+
 // --- 2. TypeScript 接口定义 (保持不变) ---
+
+
 
 interface PoemResult {
 
@@ -163,8 +347,6 @@ interface CommentResult {
 }
 
 
-
-// 嵌套评论的接口
 
 interface CommentWithReplies extends CommentResult {
 
@@ -244,7 +426,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 
 
-// --- 4. 路由定义 (只在底部新增 AI 路由) ---
+// --- 4. 路由定义 ---
 
 
 
@@ -324,7 +506,7 @@ app.get('/api/poems', async (req: express.Request, res: express.Response) => {
 
     } catch (error) {
 
-        console.error('获取诗词列表失败:', error);
+        console.error('获取诗词列表失败:', error as any);
 
         res.status(500).json({ code: 500, message: '服务器错误，获取列表失败。' });
 
@@ -398,7 +580,7 @@ app.get('/api/poems/:poemID', async (req: express.Request, res: express.Response
 
     } catch (error) {
 
-        console.error('获取诗词详情失败:', error);
+        console.error('获取诗词详情失败:', error as any);
 
         res.status(500).json({ code: 500, message: '服务器错误，获取详情失败。' });
 
@@ -518,7 +700,7 @@ app.get('/api/poems/:poemID/comments', async (req: express.Request, res: express
 
     } catch (error) {
 
-        console.error('获取评论失败:', error);
+        console.error('获取评论失败:', error as any);
 
         res.status(500).json({ code: 500, message: '服务器错误，评论加载失败。' });
 
@@ -576,7 +758,7 @@ app.post('/api/comments', async (req: express.Request, res: express.Response) =>
 
     } catch (error) {
 
-        console.error('新增评论失败:', error);
+        console.error('新增评论失败:', error as any);
 
         res.status(500).json({ code: 500, message: '服务器错误，评论添加失败。' });
 
@@ -588,21 +770,9 @@ app.post('/api/comments', async (req: express.Request, res: express.Response) =>
 
 
 
-// POST /api/ai/recommendations: 获取 AI 推荐的诗词名称 (新增功能)
+// POST /api/ai/recommendations: 获取 AI 推荐的诗词名称 (已修改查询逻辑)
 
 app.post('/api/ai/recommendations', async (req: express.Request, res: express.Response) => {
-
-    
-
-    // 检查 AI 客户端是否成功初始化
-
-    if (!(global as any).ai) {
-
-        return res.status(503).json({ code: 503, message: 'AI 服务未就绪，请检查密钥配置或代理连接。' });
-
-    }
-
-    const aiClient: GoogleGenAI = (global as any).ai; 
 
     
 
@@ -618,89 +788,97 @@ app.post('/api/ai/recommendations', async (req: express.Request, res: express.Re
 
     
 
-    // 核心：构建清晰的提示词
+    // --- 🌟 逻辑 1: 尝试精确匹配诗名 ---
 
-    const geminiPrompt = `
+    const poemDetail = await findPoemByTitle(prompt);
 
-        你是一位专业的中国古诗词鉴赏家。
+    
 
-        根据用户提供的主题或意境，推荐5首主题或意境相似的古诗词的名称。
+    if (poemDetail) {
 
-        请以清晰的、每行一个诗名的列表格式返回，不要包含作者或其他解释。
+        console.log(`🔍 识别到诗名: "${prompt.trim()}"，返回详情。`);
 
-        
+        // 匹配成功，返回该诗词的详情
 
-        用户主题: ${prompt}
-
-    `;
-
-
-
-    try {
-
-        const response = await aiClient.models.generateContent({
-
-            model: 'gemini-2.5-flash', 
-
-            contents: geminiPrompt,
-
-        });
-
-
-
-        if (!response.text) {
-
-            console.warn('Gemini API 未返回文本内容 (可能因安全设置或内容不完整)。');
-
-            return res.status(500).json({ // 保持 500 错误码，因为调用失败
-
-                code: 500, 
-
-                message: 'AI 推荐失败，未生成有效结果。', 
-
-                data: [] 
-
-            });
-
-        }
-
-
-
-        const poemNamesRaw = response.text.trim();
-
-        
-
-        // 简单处理结果，按换行符分割成数组，并清理可能的列表符号
-
-        const poemNames = poemNamesRaw.split('\n')
-
-            .map(line => line.replace(/^-|^\*|^\d+\.|\s/g, '').trim()) 
-
-            .filter(name => name.length > 0);
-
-
-
-        res.json({
+        return res.json({
 
             code: 200,
 
-            message: 'AI 推荐成功',
+            message: `成功获取诗词详情: 《${poemDetail.title}》`,
 
-            data: poemNames 
+            type: 'detail', // 标识返回的是详情
+
+            data: {
+
+                title: poemDetail.title,
+
+                poet: poemDetail.poet,
+
+                dynasty: poemDetail.dynasty,
+
+                content: poemDetail.content
+
+            }
 
         });
 
+    }
+
+    
+
+    console.log(`❌ 未匹配到精确诗名: "${prompt.trim()}"，转为 AI 推荐。`);
 
 
-    } catch (error) {
 
-        console.error('Gemini API 调用失败:', error);
+    // --- 逻辑 2: 如果不是诗名，进行 AI 推荐 ---
 
-        // 如果这里捕获到网络错误 (fetch failed sending request)，返回 500 错误
+    
 
-        res.status(500).json({ code: 500, message: 'AI 服务调用失败。' });
+    const systemInstruction = `
+
+        你是一位专业的中国古诗词鉴赏家。你的任务是根据用户提供的主题或意境，推荐5首主题或意境相似的古诗词的名称。请以清晰的、每行一个诗名的列表格式返回，不要包含作者或其他解释。
+
+    `;
+
+    
+
+    const userPrompt = `用户主题: ${prompt}`;
+
+
+
+    const recommendedDramasString = await callGeminiApi(systemInstruction, userPrompt);
+
+    
+
+    if (recommendedDramasString.includes("AI服务调用失败")) {
+
+        return res.status(500).json({ code: 500, message: recommendedDramasString });
 
     }
+
+    
+
+    const recommendedDramas = recommendedDramasString.split('\n')
+
+        .map(line => line.replace(/^-|^\*|^\d+\.|\s/g, '').trim()) 
+
+        .filter(name => name.length > 0);
+
+
+
+
+
+    res.json({
+
+        code: 200,
+
+        message: 'AI 推荐成功',
+
+        type: 'recommendation', // 标识返回的是推荐列表
+
+        data: recommendedDramas 
+
+    });
 
 });
 
@@ -782,7 +960,7 @@ app.get('/api/relationships', async (req: express.Request, res: express.Response
 
     } catch (error) {
 
-        console.error('获取关系图谱数据失败:', error);
+        console.error('获取关系图谱数据失败:', error as any);
 
         res.status(500).json({ code: 500, message: '服务器错误，获取图谱失败。' });
 
@@ -806,8 +984,6 @@ async function initializeServer() {
 
     try {
 
-        pool = mysql.createPool(dbConfig);
-
         await pool.query('SELECT 1 + 1 AS solution');
 
         console.log('✅ MySQL 数据库连接成功！');
@@ -818,9 +994,9 @@ async function initializeServer() {
 
             console.log(`🚀 服务器已启动: http://localhost:${PORT}`);
 
-            console.log(`✨ AI 推荐接口: POST http://localhost:${PORT}/api/ai/recommendations`);
+            console.log(`✨ AI 推荐接口 (支持诗名和意境查询): POST http://localhost:${PORT}/api/ai/recommendations`);
 
-            console.log(`⚠️ 请确保您的 SOCKS 代理 (socks5://127.0.0.1:7897) 正在运行！`);
+            console.log(`⚠️ 请确保您的 SOCKS 代理 (${SOCKS_PROXY_URL}) 正在运行！`);
 
         });
 
@@ -828,7 +1004,7 @@ async function initializeServer() {
 
     } catch (error) {
 
-        console.error('❌ 启动服务器失败 (可能是数据库连接失败):', error);
+        console.error('❌ 启动服务器失败 (可能是数据库连接失败):', error as any);
 
         process.exit(1); 
 

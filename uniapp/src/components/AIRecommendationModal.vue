@@ -2,7 +2,7 @@
     <view class="ai-modal-overlay" @click="$emit('close')">
         <view class="ai-modal-content" @click.stop>
             <text class="modal-title">AI 诗词推荐</text>
-            <text class="modal-subtitle">输入意境或主题 (如：思念故乡)</text>
+            <text class="modal-subtitle">输入提示词</text>
             
             <textarea
                 v-model="AIprompt"
