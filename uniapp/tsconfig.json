@@ -8,9 +8,9 @@
     },
     "lib": ["esnext", "dom"],
     "types": ["@dcloudio/types"],
-    
+
     // 强制使用现代模块语法（它已经涵盖了 importsNotUsedAsValues 和 preserveValueImports 的功能）
-    "verbatimModuleSyntax": true 
+    "verbatimModuleSyntax": true
 
 
   },

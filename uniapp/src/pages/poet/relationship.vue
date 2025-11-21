@@ -1,351 +1,708 @@
 <template>
-  <view class="container">
-    <view class="header">
-      <text class="title">诗人关系图谱 (D3 Canvas 兼容版)</text>
-    </view>
-    
-    <canvas 
-      id="relationshipCanvas" 
-      canvas-id="relationshipCanvas" 
-      class="relationship-canvas" 
-      :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }"
-      disable-scroll="true" 
-      draggable="false" 
-      
-      @touchstart="handleTouchStart"
-      @touchmove="handleTouchMove"
-      @touchend="handleTouchEnd"
-    ></canvas>
 
-    <view v-if="loading" class="loading-overlay">
-      <text class="loading-text">正在加载并计算图谱...</text>
+    <view class="relationship-container">
+
+        <view class="status-box" v-if="loading || error">
+
+            <text v-if="loading" class="status-text loading">正在计算并绘制诗人关系图谱...</text>
+
+            <view v-if="error" class="status-error">
+
+                <text>加载失败：{{ error }}</text>
+
+                <button @click="loadRelationshipData" type="button" size="mini">重试</button>
+
+            </view>
+
+        </view>
+
+
+
+        <canvas 
+
+            v-if="!loading && !error"
+
+            canvas-id="poetRelationshipCanvas" 
+
+            :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }"
+
+            class="relationship-canvas">
+
+        </canvas>
+
     </view>
-    
-    <view v-if="!loading && nodes.length === 0" class="error-text">
-      <text>未能加载数据。请检查后端服务是否启动，并确认 IP 地址配置正确。</text>
-    </view>
-  </view>
+
 </template>
 
-<script setup>
-import { ref, onMounted, nextTick } from 'vue';
-import * as d3 from 'd3'; 
-import { fetchRelationshipData } from '@/api/poem'; // 假设 API 函数已导入
+
+
+<script setup lang="ts">
+
+import { ref, onUnmounted, nextTick, getCurrentInstance } from 'vue';
+
+import { onLoad } from '@dcloudio/uni-app';
+
+
+
+// 导入后端接口定义的类型
+
+interface GraphNode { id: string; group: string; }
+
+interface GraphLink { source: string; target: string; relation: string; value: number; }
+
+interface RelationshipData { nodes: GraphNode[]; links: GraphLink[]; }
+
+
 
 // --- 配置常量 ---
-// 🚨 注意：请确认此 IP 地址是否正确。如果 H5 仍使用 localhost，但小程序必须使用 IP。
-const API_BASE_URL = 'http://192.168.126.134:3000/api'; 
-const NODE_RADIUS = 12;
-const FONT_SIZE = 10;
-const SIMULATION_DURATION = 1500; // 模拟时间
 
-// --- 状态数据 ---
-const canvasWidth = ref(375);
-const canvasHeight = ref(400); 
-const ctx = ref(null);
+const API_BASE_URL = 'http://localhost:3000/api'; 
+
+const POET_NODE_RADIUS = 15;
+
+const LINK_LINE_COLOR = '#b3c4d5';
+
+const RELATION_TEXT_COLOR = '#34495e';
+
+
+
+// --- 布局参数 (快速稳定居中) ---
+
+const ALPHA_DECAY = 0.02;     // 衰减适中
+
+const STRENGTH_LINK = 1.0;    // 连接力
+
+const STRENGTH_CHARGE = -450; // 斥力强度：合理强值
+
+const STRENGTH_CENTER = 0.06; // 向心力强度：恢复到足以居中的水平
+
+const FRICTION = 0.98;        // 摩擦/阻尼：**极大值**，使布局 3 秒内迅速稳定！
+
+
+
+// --- 响应式状态 ---
+
 const loading = ref(true);
 
-const nodes = ref([]);
-const links = ref([]);
+const error = ref<string | null>(null);
 
-let simulation = null;
-let transform = d3.zoomIdentity; 
+const canvasWidth = ref(375);
 
-// 交互状态
-let draggingNode = null; 
-let lastPinchDistance = 0;
-let lastCenter = { x: 0, y: 0 };
-let panning = false;
+const canvasHeight = ref(500);
+
+const nodes = ref<PoetNode[]>([]);
+
+const links = ref<GraphLink[]>([]);
+
+let ctx: UniApp.CanvasContext | null = null;
+
+let simulationTimer: any = null;
 
 
-// --- 颜色工具函数 (优化颜色分组) ---
-const getColor = (group) => {
-  if (group && group.includes('唐')) return '#4e79a7'; // 唐：蓝
-  if (group && group.includes('宋')) return '#f28e2b'; // 宋：橙
-  if (group && group.includes('元')) return '#59a14f'; // 元：绿
-  if (group && group.includes('明')) return '#af7aa1'; // 明：紫
-  // 默认颜色（柔和色）
-  return '#76b7b2'; 
-};
 
-// --- 绘图函数 (优化文字和描边) ---
-const renderCanvas = () => {
-  if (!ctx.value) return;
-  const context = ctx.value;
-  
-  context.clearRect(0, 0, canvasWidth.value, canvasHeight.value);
-  
-  // 核心：应用 D3 的 transform 状态（平移和缩放）
-  context.save();
-  context.translate(canvasWidth.value / 2, canvasHeight.value / 2);
-  context.translate(transform.x, transform.y);
-  context.scale(transform.k, transform.k);
-  
-  // 1. 绘制连线和关系文本
-  links.value.forEach(link => {
-    if (link.source && link.target && link.source.x !== undefined) {
-      const { x: x1, y: y1 } = link.source;
-      const { x: x2, y: y2 } = link.target;
-      
-      context.beginPath();
-      context.moveTo(x1, y1);
-      context.lineTo(x2, y2);
-      context.strokeStyle = '#999999';
-      context.lineWidth = 1 / transform.k; 
-      context.stroke();
 
-      // 绘制关系文本
-      const midX = (x1 + x2) / 2;
-      const midY = (y1 + y2) / 2;
-      
-      context.fillStyle = '#333';
-      context.setFontSize(FONT_SIZE / transform.k); 
-      context.setTextAlign('center');
-      context.setTextBaseline('middle');
-      context.fillText(link.relation, midX, midY - (5 / transform.k));
-    }
-  });
-  
-  // 2. 绘制节点
-  nodes.value.forEach(node => {
-    if (node.x !== undefined && node.y !== undefined) {
-      
-      // --- 节点本身 ---
-      context.beginPath();
-      context.fillStyle = getColor(node.group);
-      context.arc(node.x, node.y, NODE_RADIUS / transform.k, 0, 2 * Math.PI); 
-      context.fill();
-      
-      // 🌟 优化：添加描边，提升清晰度
-      context.strokeStyle = '#666'; 
-      context.lineWidth = 0.5 / transform.k; 
-      context.stroke();
-      
-      // --- 诗人姓名 (移到圆圈外部) ---
-      context.fillStyle = '#333'; 
-      context.setFontSize(FONT_SIZE / transform.k); 
-      context.setTextAlign('left'); 
-      context.setTextBaseline('middle'); 
-      
-      // 🌟 优化：将文字位置移到圆圈外部 (右侧)
-      const textOffsetX = (NODE_RADIUS + 3) / transform.k; 
-      context.fillText(node.id, node.x + textOffsetX, node.y); 
-    }
-  });
 
-  context.restore();
-  context.draw(false); 
+// --- 扩展类型定义 ---
+
+interface PoetNode extends GraphNode {
+
+    x: number;
+
+    y: number;
+
+    vx: number; 
+
+    vy: number; 
+
+    color: string; 
+
+}
+
+interface UniAppResponse {
+
+    data: { code: number; message: string; data: RelationshipData; };
+
+    statusCode: number; errMsg: string;
+
+}
+
+
+
+// 颜色映射：根据朝代分组
+
+const DYNASTY_COLORS: { [key: string]: string } = {
+
+    '唐': '#3498db', 
+
+    '宋': '#2ecc71', 
+
+    '清': '#9b59b6', 
+
+    '元': '#e74c3c', 
+
+    '明': '#f1c40f', 
+
+    '其他': '#95a5a6' 
+
 };
 
 
-// ----------------------------------------------------------------------------------
-// --- D3 力模拟和数据加载 (优化布局参数) ---
-// ----------------------------------------------------------------------------------
-
-const initSimulation = () => {
-    if (simulation) simulation.stop();
-    if (nodes.value.length === 0) { loading.value = false; return; }
-    
-    simulation = d3.forceSimulation(nodes.value)
-        // 🌟 优化：增加 link distance 到 120
-        .force('link', d3.forceLink(links.value).id(d => d.id).distance(120)) 
-        // 🌟 优化：增强排斥力，防止拥挤
-        .force('charge', d3.forceManyBody().strength(-400)) 
-        .force('center', d3.forceCenter(0, 0)) 
-        // 🌟 关键优化：添加碰撞检测，防止节点重叠
-        .force('collide', d3.forceCollide().radius(NODE_RADIUS * 1.5).strength(0.8)); 
-
-    setTimeout(() => { if(simulation) simulation.stop(); renderCanvas(); }, SIMULATION_DURATION); 
-
-    simulation.alpha(1).restart(); 
-    loading.value = false;
-};
 
 
-const fetchRelationships = async () => {
+
+// --- 生命周期和数据加载 ---
+
+
+
+onLoad(() => {
+
+    const systemInfo = uni.getSystemInfoSync();
+
+    canvasWidth.value = systemInfo.windowWidth;
+
+    canvasHeight.value = systemInfo.windowHeight; 
+
+    loadRelationshipData();
+
+});
+
+
+
+onUnmounted(() => {
+
+    clearInterval(simulationTimer);
+
+});
+
+
+
+async function loadRelationshipData() {
+
     loading.value = true;
+
+    error.value = null;
+
+    
+
     try {
-        const res = await uni.request({
-            url: `${API_BASE_URL}/relationships`,
-            method: 'GET',
+
+        const response: UniAppResponse = await new Promise((resolve, reject) => {
+
+            uni.request({
+
+                url: `${API_BASE_URL}/relationships`,
+
+                method: 'GET',
+
+                success: (res) => {
+                    // 兼容类型转换
+                    resolve({
+                        data: res.data as {
+                            code: number;
+                            message: string;
+                            data: RelationshipData;
+                        },
+                        statusCode: res.statusCode,
+                        errMsg: res.errMsg ?? ''
+                    });
+                },
+
+                fail: reject
+
+            });
         });
-        
-        const result = res.data;
-        if (res.statusCode === 200 && result && result.data) {
-            nodes.value = result.data.nodes || [];
-            links.value = result.data.links || [];
-            initSimulation();
+
+
+
+        if (response.statusCode === 200 && response.data.code === 200) {
+
+            const data = response.data.data;
+
+            
+
+            const centerX = canvasWidth.value / 2;
+
+            const centerY = canvasHeight.value / 2;
+
+            
+
+            const initializedNodes: PoetNode[] = data.nodes.map((node) => ({
+
+                ...node,
+
+                // 初始位置稍微集中在中心
+
+                x: centerX + (Math.random() - 0.5) * 50,
+
+                y: centerY + (Math.random() - 0.5) * 50,
+
+                vx: 0,
+
+                vy: 0,
+
+                color: DYNASTY_COLORS[node.group] || DYNASTY_COLORS['其他']
+
+            }));
+
+            
+
+            nodes.value = initializedNodes;
+
+            links.value = data.links;
+
+            
+
+            nextTick(() => {
+
+                initCanvas(); 
+
+                startSimulation(); // 启动短暂的计算
+
+            });
+
         } else {
-            console.error('❌ 获取关系图谱数据失败:', result ? result.message : '返回数据结构错误');
-            nodes.value = []; loading.value = false;
+
+            error.value = `请求失败: ${response.data.message || '未知错误'}`;
+
         }
 
-    } catch (err) {
-        console.error('❌ 网络请求失败，请检查 IP 地址和后端服务状态:', err);
-        loading.value = false; nodes.value = []; 
-        uni.showToast({ title: '加载图谱失败，请检查网络和IP', icon: 'none' });
+    } catch (e) {
+
+        error.value = `网络错误或服务器无响应: ${(e as any).errMsg || (e as Error).message}`;
+
+    } finally {
+
+        loading.value = false;
+
     }
-};
+
+}
 
 
-// ----------------------------------------------------------------------------------
-// ** D3 交互事件处理 (基于 Canvas 原生事件) **
-// ----------------------------------------------------------------------------------
 
-const findNodeByPoint = (x, y) => {
-    if (!simulation) return null;
+/** 初始化 Canvas 上下文 */
+
+function initCanvas() {
+
+    // #ifdef MP
+
+    const vm = getCurrentInstance()?.proxy as any;
+    ctx = uni.createCanvasContext('poetRelationshipCanvas', vm);
+
+    // #endif
+
     
-    const d3_x = (x - canvasWidth.value / 2 - transform.x) / transform.k;
-    const d3_y = (y - canvasHeight.value / 2 - transform.y) / transform.k;
-    const searchRadius = NODE_RADIUS / transform.k; 
-    
-    return simulation.find(d3_x, d3_y, searchRadius);
-};
 
-const handleTouchStart = (event) => {
-    event.preventDefault(); 
+    // #ifndef MP
+
+    ctx = uni.createCanvasContext('poetRelationshipCanvas');
+
+    // #endif
+
+}
+
+
+
+
+
+// --- 布局模拟 (Force-Directed Layout) ---
+
+
+
+function startSimulation() {
+
+    clearInterval(simulationTimer);
+
+    (nodes.value as any).alpha = 1; 
+
     
-    if (event.touches.length === 1) {
-        const touch = event.touches[0];
-        draggingNode = findNodeByPoint(touch.x, touch.y);
-        
-        if (draggingNode) {
-            if (simulation) simulation.alphaTarget(0.3).restart();
-            draggingNode.fx = draggingNode.x;
-            draggingNode.fy = draggingNode.y;
-        } else {
-            panning = true;
-            lastCenter = { x: touch.x, y: touch.y };
+
+    // *** 核心：仅运行 3 秒 (60 FPS * 3 = 180 帧) ***
+
+    const totalTicks = 60 * 3; 
+
+    let tickCount = 0;
+
+
+
+    simulationTimer = setInterval(() => {
+
+        tick();
+
+        tickCount++;
+
+        // 运行到帧数限制后停止
+
+        if (tickCount >= totalTicks) {
+
+             clearInterval(simulationTimer);
+
+             simulationTimer = null;
+
         }
-        
-    } else if (event.touches.length === 2) {
-        panning = false;
-        draggingNode = null;
-        const [t1, t2] = event.touches;
-        lastPinchDistance = Math.hypot(t2.x - t1.x, t2.y - t1.y);
+
+    }, 1000 / 60); 
+
+}
+
+
+
+function tick() {
+
+    if (!nodes.value.length || !ctx) return;
+
+
+
+    let alpha = (nodes.value as any).alpha;
+
+    if (alpha < 0.001) {
+
+        alpha = 0;
+
     }
-};
 
-const handleTouchMove = (event) => {
-    event.preventDefault(); 
-    
-    if (draggingNode) {
-        const touch = event.touches[0];
-        draggingNode.fx = (touch.x - canvasWidth.value / 2 - transform.x) / transform.k;
-        draggingNode.fy = (touch.y - canvasHeight.value / 2 - transform.y) / transform.k;
-        renderCanvas();
+    (nodes.value as any).alpha -= ALPHA_DECAY;
+
+
+
+    // 1. Link Force (连接力)
+
+    links.value.forEach(link => {
+
+        const sourceNode = nodes.value.find(n => n.id === link.source)!;
+
+        const targetNode = nodes.value.find(n => n.id === link.target)!;
+
+        const dx = targetNode.x - sourceNode.x;
+
+        const dy = targetNode.y - sourceNode.y;
+
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
         
-    } else if (event.touches.length === 1 && panning) {
-        const touch = event.touches[0];
-        const dx = touch.x - lastCenter.x;
-        const dy = touch.y - lastCenter.y;
 
-        transform = transform.translate(dx, dy);
-        lastCenter = { x: touch.x, y: touch.y };
-        renderCanvas();
+        // 理想距离
 
-    } else if (event.touches.length === 2) {
-        const [t1, t2] = event.touches;
-        const newPinchDistance = Math.hypot(t2.x - t1.x, t2.y - t1.y);
-        const scaleFactor = newPinchDistance / lastPinchDistance;
+        const idealDistance = 120 - link.value * 10; 
 
-        let newK = transform.k * scaleFactor;
         
-        if (newK < 0.5) newK = 0.5;
-        if (newK > 4) newK = 4;
-        
-        const center_x = (t1.x + t2.x) / 2;
-        const center_y = (t1.y + t2.y) / 2;
-        
-        // 使用 D3.zoomIdentity 进行复杂的缩放和平移计算
-        transform = d3.zoomIdentity
-            .translate(center_x, center_y) 
-            .scale(newK)                   
-            .translate(transform.x / transform.k * newK - center_x, transform.y / transform.k * newK - center_y); 
 
-        lastPinchDistance = newPinchDistance;
-        renderCanvas();
-    }
-};
-
-const handleTouchEnd = (event) => {
-    event.preventDefault(); 
-    
-    panning = false;
-    lastPinchDistance = 0;
-
-    if (draggingNode) {
-        if (simulation) simulation.alphaTarget(0);
-        draggingNode.fx = null;
-        draggingNode.fy = null;
-        draggingNode = null;
-    }
-};
+        const strength = STRENGTH_LINK * alpha * (distance - idealDistance) / distance;
 
 
-// --- 生命周期钩子 ---
-onMounted(async () => {
-    uni.getSystemInfo({
-        success: (res) => {
-            canvasWidth.value = res.windowWidth; 
-            canvasHeight.value = res.windowHeight - 80; 
+
+        if (distance > 0) {
+
+            const forceX = dx * strength;
+
+            const forceY = dy * strength;
+
+            sourceNode.vx += forceX;
+
+            sourceNode.vy += forceY;
+
+            targetNode.vx -= forceX;
+
+            targetNode.vy -= forceY;
+
         }
+
     });
 
-    await nextTick();
-    
-    // 获取 Canvas 2D 绘图上下文
-    ctx.value = uni.createCanvasContext('relationshipCanvas'); 
 
-    // 开始加载数据和模拟
-    fetchRelationships();
-});
+
+    // 2. Charge Force (斥力) & Center Force (向心力) & Position Update
+
+    const centerX = canvasWidth.value / 2;
+
+    const centerY = canvasHeight.value / 2;
+
+    const boundaryPadding = POET_NODE_RADIUS * 2; 
+
+
+
+    nodes.value.forEach(nodeA => {
+
+        // 斥力计算
+
+        for (let i = 0; i < nodes.value.length; i++) {
+
+            const nodeB = nodes.value[i];
+
+            if (nodeA === nodeB) continue;
+
+
+
+            const dx = nodeB.x - nodeA.x;
+
+            const dy = nodeB.y - nodeA.y;
+
+            const distanceSq = dx * dx + dy * dy;
+
+            
+
+            // 斥力
+
+            const strength = STRENGTH_CHARGE * alpha / (distanceSq || 1); 
+
+            
+
+            const forceX = dx * strength;
+
+            const forceY = dy * strength;
+
+
+
+            nodeA.vx -= forceX;
+
+            nodeA.vy -= forceY;
+
+        }
+
+
+
+        // 向心力（居中）
+
+        nodeA.vx += (centerX - nodeA.x) * STRENGTH_CENTER * alpha;
+
+        nodeA.vy += (centerY - nodeA.y) * STRENGTH_CENTER * alpha;
+
+        
+
+        // 速度衰减 (摩擦力)，极高的 FRICTION 意味着快速稳定
+
+        nodeA.vx *= FRICTION; 
+
+        nodeA.vy *= FRICTION;
+
+        
+
+        // 位置更新
+
+        nodeA.x += nodeA.vx;
+
+        nodeA.y += nodeA.vy;
+
+        
+
+        // 软性边界惩罚
+
+        if (nodeA.x < boundaryPadding || nodeA.x > canvasWidth.value - boundaryPadding) {
+
+            nodeA.vx = -nodeA.vx * 0.5; 
+
+            nodeA.x = Math.max(boundaryPadding, Math.min(canvasWidth.value - boundaryPadding, nodeA.x));
+
+        }
+
+        if (nodeA.y < boundaryPadding || nodeA.y > canvasHeight.value - boundaryPadding) {
+
+            nodeA.vy = -nodeA.vy * 0.5; 
+
+            nodeA.y = Math.max(boundaryPadding, Math.min(canvasHeight.value - boundaryPadding, nodeA.y));
+
+        }
+
+    });
+
+
+
+    drawCanvas();
+
+}
+
+
+
+
+
+// --- 绘制 ---
+
+
+
+function drawCanvas() {
+
+    if (!ctx) return;
+
+    
+
+    ctx.clearRect(0, 0, canvasWidth.value, canvasHeight.value);
+
+    
+
+    // 1. 绘制边 (Links)
+
+    links.value.forEach(link => {
+
+        const sourceNode = nodes.value.find(n => n.id === link.source)!;
+
+        const targetNode = nodes.value.find(n => n.id === link.target)!;
+
+        
+
+        // 绘制连线
+
+        ctx!.beginPath();
+
+        ctx!.setStrokeStyle(LINK_LINE_COLOR);
+
+        ctx!.setLineWidth(0.5 + link.value * 0.3);
+
+        ctx!.setLineCap('round');
+
+        ctx!.setGlobalAlpha(0.6); 
+
+        ctx!.moveTo(sourceNode.x, sourceNode.y);
+
+        ctx!.lineTo(targetNode.x, targetNode.y);
+
+        ctx!.stroke();
+
+        
+
+        // 绘制关系文字
+
+        ctx!.setGlobalAlpha(1.0); 
+
+        const midX = (sourceNode.x + targetNode.x) / 2;
+
+        const midY = (sourceNode.y + targetNode.y) / 2;
+
+        
+
+        ctx!.setFontSize(10);
+
+        ctx!.setTextAlign('center');
+
+        ctx!.setTextBaseline('middle');
+
+        
+
+        // 绘制文字背景：纯白色矩形
+
+        ctx!.save();
+
+        ctx!.setFillStyle('rgba(255, 255, 255, 1)'); 
+
+        const textMetrics = ctx!.measureText(link.relation);
+
+        const textWidth = textMetrics.width || (link.relation.length * 10);
+
+        ctx!.fillRect(midX - textWidth / 2 - 3, midY - 8, textWidth + 6, 16);
+
+        ctx!.restore();
+
+        
+
+        // 绘制文字
+
+        ctx!.setFillStyle(RELATION_TEXT_COLOR); 
+
+        ctx!.fillText(link.relation, midX, midY); 
+
+    });
+
+
+
+    // 2. 绘制节点 (Nodes)
+
+    nodes.value.forEach(node => {
+
+        // 节点圆形
+
+        ctx!.beginPath();
+
+        ctx!.arc(node.x, node.y, POET_NODE_RADIUS, 0, 2 * Math.PI);
+
+        ctx!.setFillStyle(node.color); 
+
+        ctx!.fill();
+
+        
+
+        // 节点边框
+
+        ctx!.setStrokeStyle('#ffffff'); 
+
+        ctx!.setLineWidth(1.5);
+
+        ctx!.stroke();
+
+
+
+        // 节点文字 (诗人姓名)
+
+        ctx!.setFillStyle('#ffffff'); 
+
+        ctx!.setFontSize(10);
+
+        ctx!.setTextAlign('center');
+
+        ctx!.setTextBaseline('middle');
+
+        
+
+        const poetName = node.id.length > 3 ? node.id.substring(0, 3) : node.id;
+
+        ctx!.fillText(poetName, node.x, node.y); 
+
+    });
+
+
+
+    ctx!.draw();
+
+}
+
+
+
 </script>
 
+
+
 <style scoped>
-.container {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  background-color: #f0f4f7; 
-  padding: 10px;
-}
-.header {
-  padding: 10px 0;
-  text-align: center;
-  background-color: #ffffff;
-  border-radius: 8px;
-  margin-bottom: 10px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-}
-.title {
-  font-size: 16px;
-  font-weight: bold;
-  color: #333;
-}
-.relationship-canvas {
-  flex-grow: 1; 
-  background-color: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-.loading-overlay {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
+
+.relationship-container {
+
+    width: 100vw;
+
+    height: 100vh;
+
     display: flex;
-    justify-content: center;
+
+    flex-direction: column;
+
     align-items: center;
-    background-color: rgba(255, 255, 255, 0.8);
-    z-index: 10;
+
+    justify-content: center; 
+
+    background-color: #f0f2f5; 
+
 }
-.loading-text, .error-text {
-    font-size: 14px;
-    color: #666;
+
+
+
+.status-box {
+
     text-align: center;
+
     padding: 20px;
+
 }
-.error-text {
-    color: #e15759;
-    font-weight: bold;
+
+
+
+.relationship-canvas {
+
+    width: 100%;
+
+    height: 100%;
+
+    background-color: #ffffff; 
+
+    border-radius: 8px;
+
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08); 
+
 }
+
 </style>
