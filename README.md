@@ -1,185 +1,218 @@
-这是一个基于您项目技术栈（UniApp/Vue 3/TypeScript + Node.js/MySQL）定制的 README 模板。请根据您的实际项目名称和具体情况修改其中的占位符和连接信息。
+# 古诗词资源库 
 
-------
+一个功能完整的中国古诗词学习和探索平台，集成 AI 推荐、诗人关系图谱、评论互动等功能。
 
+##  一、核心特性
 
+### 诗词资源库
+- **诗词列表展示** - 浏览古诗词资源
+- **智能搜索** - 支持按诗名、诗人、朝代、内容搜索
+- **详情页面** - 查看完整诗词内容和创作背景
 
-#  中国古诗词鉴赏与交流平台
+### AI 智能推荐
+- **意境推荐** - 根据用户输入的主题或意境 AI 推荐相似诗词
+- **精确查询** - 输入诗名时自动返回该诗词详情
+- 基于 Google Gemini API 的高质量推荐
 
+### 社区评论系统
+- **评论互动** - 用户可发表评论和观点
+- **嵌套回复** - 支持评论间的深层次讨论
+- **匿名评论** - 支持匿名用户参与
 
+### 诗人关系图谱
+- **可视化展示** - Force-Directed Layout 力导向图算法
+- **动态布局** - 节点自动收敛至稳定状态
+- **关系标注** - 显示诗人间的具体关系
 
+---
 
-
-## 简介
-
-
-
-这是一个跨平台的古诗词鉴赏与交流应用。前端基于 **UniApp (Vue 3/TypeScript)** 实现，支持多端部署。后端使用 **Node.js (Express) + MySQL** 架构，提供诗词数据和高性能的嵌套评论服务。
-
-
-
-
-
-## 主要功能
-
-
-
-- **诗词浏览与搜索**：快速查找并展示古诗词列表。
-- **诗词详情展示**：清晰显示诗词的标题、朝代、作者和分行内容。
-- **嵌套评论系统 (Nesting Comments)**：
-  - 后端基于 SQL 和 Node.js 动态构建树形评论结构。
-  - 前端使用 **递归组件** 实现无限级回复和分级缩进显示。
-  - 支持用户昵称和回复目标 (`回复 @XXX`) 标识。
-- **关系图谱 (待定)**：提供诗人间的关联关系可视化（根据 `server.ts` 路由推测）。
-
-
-
-##  技术栈
-
-
-
-| **模块**          | **技术**                    | **描述**                                     |
-| ----------------- | --------------------------- | -------------------------------------------- |
-| **前端 (Client)** | UniApp (Vue 3 / TypeScript) | 跨平台应用开发框架。                         |
-|                   | Vue 3 Composition API       | 使用 `script setup` 提升开发效率和可维护性。 |
-|                   | `uni-ui`                    | UniApp 官方 UI 组件库。                      |
-| **后端 (Server)** | Node.js / Express           | 快速构建 API 服务。                          |
-|                   | MySQL / `mysql2/promise`    | 数据存储与异步数据库操作。                   |
-
-
-
-## 项目搭建与运行
-
-
-
-
-
-### 1. 后端服务 (Node.js/Express)
-
-
-
-
-
-#### A. 数据库配置
-
-
-
-1. **安装 MySQL**：确保您的系统安装并运行了 MySQL 服务。
-
-2. **创建数据库**：创建一个名为 `resource_db1` (或您自定义的名称) 的数据库。
-
-3. **导入数据**：执行您项目的 SQL 脚本，创建 `poem`, `poet`, `comment` 等表并填充初始数据。
-
-4. **配置连接**：在您的 `server.ts` 文件中，修改 `dbConfig` 部分，确保数据库连接信息正确：
-
-   TypeScript
-
-   ```
-   const dbConfig = {
-       host: 'localhost',      
-       user: 'root',           
-       password: '', // 您的 MySQL 密码
-       database: 'resource_db1', 
-       // ...
-   };
-   ```
-
-
-
-#### B. 运行 API 服务
-
-
-
-1. 进入后端项目目录：
-
-   Bash
-
-   ```
-   cd backend
-   ```
-
-2. 安装依赖：
-
-   Bash
-
-   ```
-   npm install
-   ```
-
-3. 启动服务：
-
-   Bash
-
-   ```
-   npx ts-node server.ts 
-   ```
-
-   服务默认运行在 `http://localhost:3000`。
-
-
-
-### 2. 前端客户端 (UniApp)
-
-
-
-#### A. 环境准备
-
-
-
-1. 安装 **HBuilderX** 或配置好 UniApp CLI 开发环境。
-2. 启动后按照指示导入到百度开发者工具中。
-
-
-
-#### B. 运行客户端
-
-
-
-1. 进入前端项目目录：
-
-   Bash
-
-   ```
-   cd uniapp
-   npm install
-   ```
-
-2. 在 `manifest.json` 或您的配置中，确认 API 基地址指向后端服务：`http://localhost:3000`。
-
-3. 通过 HBuilderX 或 UniApp CLI 运行到 H5、微信小程序或 App 模拟器。
-
-   Bash
-
-   ```
-   npm run dev:h5
-   # 或 npm run dev:mp-weixin等等
-   ```
-
-
-
-##  关键文件说明
-
-构：
+## 二、项目结构
 
 ```
-.
-├── backend/                  # Node.js/Express 后端服务
-│   ├── server.ts             # 主服务文件 (API 路由、数据库连接)
-│   └── package.json          # 后端依赖
-├── sql/                      # 数据库配置
-│   └── schema.sql            # 数据库表结构定义文件
-├── uniapp/                   # uni-app 前端项目根目录
-│   └── src/                  # 源代码目录
-│       ├── api/              # 封装 API 接口请求
-│       ├── components/       # 公共组件 (如 CommentItem.vue)
-│       ├── pages/            # 页面视图文件 (.vue)
-│       ├── stores/           # Pinia 状态管理模块
-│       ├── main.ts           # 应用入口，初始化 Vue 和 Pinia
-│       ├── pages.json        # 页面路由和窗口样式配置
-└── README.md                 # 项目说明文件
+├── frontend/                      # uni-app 前端项目
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── poem/
+│   │   │   │   ├── list.vue       # 诗词列表页
+│   │   │   │   └── detail.vue     # 诗词详情页
+│   │   │   ├── poet/
+│   │   │   │   └── relationship.vue # 诗人关系图谱
+│   │   │   └── index.vue          # 首页
+│   │   ├── components/
+│   │   │   ├── CommentItem.vue    # 递归评论组件
+│   │   │   └── AIRecommendationModal.vue # AI 推荐弹窗
+│   │   ├── stores/
+│   │   │   └── poemStore.ts       # Pinia 状态管理
+│   │   ├── api/
+│   │   │   ├── poem.ts            # 诗词相关 API
+│   │   │   └── ai.ts              # AI 推荐 API
+│   │   └── pages.json             # 路由配置
+│
+├── backend/                       # Node.js + Express 后端
+│   └── server.ts                  # 服务器主程序
+│
+└── README.md                      # 本文件
+```
+
+---
+
+## 三、快速开始
+
+### 前置要求
+- **Node.js** >= 14.0
+- **MySQL** >= 5.7
+- **uni-app 开发环境**
+- **SOCKS5 代理**（用于调用 Gemini API）
+
+### 后端服务搭建
+
+#### 数据库初始化
+```sql
+CREATE DATABASE resource_db1;
+USE resource_db1;
+
+-- 诗词表
+CREATE TABLE poem (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(100) NOT NULL,
+    content LONGTEXT NOT NULL,
+    poetID INT NOT NULL,
+    FOREIGN KEY (poetID) REFERENCES poet(id)
+);
+
+-- 诗人表
+CREATE TABLE poet (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(50) NOT NULL UNIQUE,
+    dynasty VARCHAR(20) NOT NULL
+);
+
+-- 评论表
+CREATE TABLE comment (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    poemID INT NOT NULL,
+    content TEXT NOT NULL,
+    username VARCHAR(50),
+    createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    parentID INT,
+    FOREIGN KEY (poemID) REFERENCES poem(id),
+    FOREIGN KEY (parentID) REFERENCES comment(id)
+);
+
+-- 诗人关系表
+CREATE TABLE poet_relationship (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    poetA_name VARCHAR(50) NOT NULL,
+    poetB_name VARCHAR(50) NOT NULL,
+    relation VARCHAR(100),
+    value INT DEFAULT 1
+);
+```
+
+#### 安装依赖
+```bash
+cd backend
+npm install express mysql2 cors body-parser axios socks-proxy-agent
+```
+
+#### 配置服务器
+编辑 `server.ts`：
+```typescript
+// 数据库配置
+const dbConfig = {
+    host: 'localhost',
+    user: 'root',           // 修改为您的 MySQL 用户
+    password: '',           // 修改为您的密码
+    database: 'resource_db1'
+};
+
+// Gemini API 配置
+const GEMINI_API_KEY = 'YOUR_API_KEY_HERE';
+const SOCKS_PROXY_URL = 'socks5://127.0.0.1:7897'; // 修改为您的代理地址
+```
+
+#### 启动服务器
+```bash
+npx ts-node server.ts
+```
+
+如无 ts-node，先安装：
+```bash
+npm install -g ts-node typescript
+```
+
+### 前端应用配置
+
+#### 安装依赖
+```bash
+cd frontend
+npm install
+```
+
+#### 运行开发服务器
+```bash
+npm run dev
 ```
 
 
 
-------
+---
+
+## 四、核心技术栈
+
+### 前端
+- **uni-app** - 跨平台开发框架
+- **Vue 3 + TypeScript** - 前端框架和语言
+- **Pinia** - 状态管理
+- **uni-ui** - 组件库
+- **Canvas** - 图谱可视化
+
+### 后端
+- **Node.js + Express** - Web 服务框架
+- **MySQL 2** - 数据库驱动
+- **Axios** - HTTP 客户端
+- **CORS** - 跨域资源共享
+- **SOCKS Proxy Agent** - 代理支持
+
+### AI 服务
+- **Google Gemini 2.5 Flash** - 大语言模型
+
+---
+
+## 五、关键配置说明
+
+### SOCKS 代理配置
+
+如果需要使用 AI 推荐功能，需要配置 SOCKS5 代理：
+
+```typescript
+// server.ts 中的配置
+const SOCKS_PROXY_URL = 'socks5://127.0.0.1:7897';
+const agent = new SocksProxyAgent(SOCKS_PROXY_URL);
+```
+
+**常见代理工具**：
+- Clash
+- v2ray
+- Shadowsocks
+
+### Gemini API 密钥
+
+获取方式：
+1. 访问 [Google AI Studio](https://aistudio.google.com/app/apikey)
+2. 创建新的 API 密钥
+3. 替换 `server.ts` 中的 `GEMINI_API_KEY`
+
+---
+
+##  六、项目文件说明
+
+| 文件                        | 用途                                     |
+| --------------------------- | ---------------------------------------- |
+| `poemStore.ts`              | Pinia 状态管理，管理诗词列表和搜索状态   |
+| `relationship.vue`          | 诗人关系图谱核心页面，包含力导向布局算法 |
+| `detail.vue`                | 诗词详情页，整合评论系统                 |
+| `CommentItem.vue`           | 递归评论组件，支持深层嵌套               |
+| `AIRecommendationModal.vue` | AI 推荐弹窗组件                          |
+| `server.ts`                 | 后端主服务，包含所有 API 路由和业务逻辑  |
 
