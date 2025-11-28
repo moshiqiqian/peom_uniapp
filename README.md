@@ -29,7 +29,7 @@
 ## 二、项目结构
 
 ```
-├── frontend/                      # uni-app 前端项目
+├── uniapp/                      # uni-app 前端项目
 │   ├── src/
 │   │   ├── pages/
 │   │   │   ├── poem/
